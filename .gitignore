@@ -1,0 +1,8 @@
+scuzzer
+*.exe
+*.out
+
+# Output directories (generated at runtime)
+*/screenshots/
+*/report.json
+*/summary.txt

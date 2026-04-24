@@ -200,12 +200,24 @@ func cleanDomains(domains []string) []string {
 func parsePorts(flag string) []int {
 	switch flag {
 	case "default":
-		return defaultWebPorts
+		return dedupPorts(defaultWebPorts)
 	case "full":
-		return fullWebPorts
+		return dedupPorts(fullWebPorts)
 	default:
 		return parseCustomPorts(flag)
 	}
+}
+
+func dedupPorts(ports []int) []int {
+	seen := make(map[int]bool, len(ports))
+	out := make([]int, 0, len(ports))
+	for _, p := range ports {
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func printReport(targets []*WebTarget) {

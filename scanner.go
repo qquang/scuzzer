@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -22,7 +21,7 @@ import (
 // Default common web ports ordered by frequency
 var defaultWebPorts = []int{
 	80, 443, 8080, 8443, 8000, 8888, 8008, 8081, 8082, 8083,
-	8090, 8443, 9000, 9090, 9443, 3000, 3443, 4443, 5000, 5443,
+	8090, 9000, 9090, 9443, 3000, 3443, 4443, 5000, 5443,
 	7000, 7443, 8787, 9200, 9300, 10000, 10443,
 }
 
@@ -369,10 +368,6 @@ func scanDomains(domains []string, cfg *Config) []*WebTarget {
 func probeHost(client *http.Client, domain string, cfg *Config) []*WebTarget {
 	var results []*WebTarget
 
-	// Deduplicate: track which URLs we've already confirmed alive
-	// (e.g., port 80 and 443 may both redirect to same URL)
-	seenURLs := make(map[string]bool)
-
 	for _, port := range cfg.Ports {
 		if cfg.RateDelay > 0 {
 			time.Sleep(cfg.RateDelay)
@@ -399,19 +394,16 @@ func probeHost(client *http.Client, domain string, cfg *Config) []*WebTarget {
 				continue
 			}
 
-			// Filter out protocol mismatch responses (HTTP→HTTPS port gives 400)
+			// Protocol mismatch (e.g. HTTP sent to HTTPS port) → try other scheme
 			if isProtocolMismatch(t) {
 				continue
 			}
 
-			// Deduplicate by final URL after redirects
-			key := normURL(t.FinalURL)
-			if seenURLs[key] {
-				continue
-			}
-			seenURLs[key] = true
+			// Valid web service found on this port — record and move to next port.
+			// No cross-port deduplication: port 8080 redirecting to :443 is still
+			// an independent finding (the port is open and serving HTTP).
 			results = append(results, t)
-			break // Found a live web service on this port, move to next port
+			break
 		}
 	}
 
@@ -431,27 +423,16 @@ func schemeOrder(port int) []string {
 	return []string{"http", "https"}
 }
 
-func normURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return raw
-	}
-	// Normalize: strip trailing slash, lowercase host
-	u.Host = strings.ToLower(u.Host)
-	u.Path = strings.TrimSuffix(u.Path, "/")
-	return u.String()
-}
-
-// isProtocolMismatch returns true when HTTP was sent to an HTTPS port (or vice versa),
-// producing a meaningless 400 error that is not a real web finding.
+// isProtocolMismatch returns true when HTTP was sent to an HTTPS port (or vice versa).
+// Only matches the specific Nginx/server error for this condition — NOT generic 400s,
+// which are legitimate app responses and must not be filtered out.
 func isProtocolMismatch(t *WebTarget) bool {
 	if t.StatusCode != 400 {
 		return false
 	}
 	lowerTitle := strings.ToLower(t.Title)
 	return strings.Contains(lowerTitle, "plain http") ||
-		strings.Contains(lowerTitle, "https port") ||
-		strings.Contains(lowerTitle, "bad request")
+		strings.Contains(lowerTitle, "https port")
 }
 
 func parseCustomPorts(s string) []int {
